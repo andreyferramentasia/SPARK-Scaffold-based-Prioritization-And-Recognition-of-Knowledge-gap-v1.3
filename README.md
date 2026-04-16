@@ -84,7 +84,7 @@ If you skip this, everything else still works.
 
 ## Getting SPARK
 
-1. Download the ZIP file from the project page
+1. On the project page, click the green **`<> Code`** button (top right) → **"Download ZIP"**
 2. Right-click the ZIP → **"Extract All..."**
 3. Choose a folder (e.g. `C:\Users\YourName\Documents\SPARK`)
 4. Click **Extract**
