@@ -95,6 +95,10 @@ If you skip this, everything else still works.
 
 ## Getting the database files
 
+Download the database files from the link below and place them inside the `DBs\` folder:
+
+**[📦 Download DBs from Google Drive](https://drive.google.com/drive/folders/1drCdBI3F2Wtzby4A9csyb74cpecefNYE?usp=sharing)**
+
 You need two types of files placed inside the `DBs\` folder:
 
 ### LOTUS database (required for Part I)
