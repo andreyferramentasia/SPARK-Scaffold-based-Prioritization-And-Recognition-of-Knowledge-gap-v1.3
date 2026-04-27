@@ -636,7 +636,7 @@ with tab_preview:
             # ── Chart tabs ────────────────────────────────────────────────────
             if main_df is not None:
                 # Discover columns once — used across multiple tabs
-                sup_col      = next((c for c in main_df.columns if "npclassifier" in c.lower() and "superclass" in c.lower()), None)
+                sup_col      = "hybrid_class" if "hybrid_class" in main_df.columns else next((c for c in main_df.columns if "npclassifier" in c.lower() and "superclass" in c.lower()), None)
                 cls_col      = next((c for c in main_df.columns if "npclassifier" in c.lower() and "class" in c.lower() and "superclass" not in c.lower()), None)
                 mw_col       = next((c for c in main_df.columns if c.lower() in ("molecular_weight", "mw")), None)
                 logp_col     = next((c for c in main_df.columns if c.lower() in ("xlogp", "alogp", "logp")), None)
