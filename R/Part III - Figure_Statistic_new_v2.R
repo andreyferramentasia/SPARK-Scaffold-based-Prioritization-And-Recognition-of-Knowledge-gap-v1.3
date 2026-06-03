@@ -125,13 +125,14 @@ if (!is.null(species_col)) {
 }
 
 # Aplica filtro de escopo com base em TAXON_MODE/TAXON_VALUES
+.tv_lower <- tolower(TAXON_VALUES)
 lin_scope <- lin_scope %>%
   dplyr::mutate(.species_std = species_std) %>%
   dplyr::filter(
     dplyr::case_when(
-      identical(TAXON_MODE, "family")  ~ family %in% TAXON_VALUES,
-      identical(TAXON_MODE, "genus")   ~ genus  %in% TAXON_VALUES,
-      identical(TAXON_MODE, "species") ~ .species_std %in% TAXON_VALUES,
+      identical(TAXON_MODE, "family")  ~ tolower(family) %in% .tv_lower,
+      identical(TAXON_MODE, "genus")   ~ tolower(genus)  %in% .tv_lower,
+      identical(TAXON_MODE, "species") ~ tolower(.species_std) %in% .tv_lower,
       TRUE ~ TRUE
     )
   )

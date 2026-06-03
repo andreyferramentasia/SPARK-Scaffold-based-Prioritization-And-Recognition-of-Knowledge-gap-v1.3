@@ -86,6 +86,13 @@ if (!is.null(config_file)) {
 cfg$taxon_mode         <- tolower(cfg$taxon_mode)
 cfg$analysis_tax_level <- tolower(cfg$analysis_tax_level)
 
+# Normalize taxon values: first letter uppercase, rest lowercase
+# handles "melastomataceae" → "Melastomataceae", "OCOTEA" → "Ocotea", etc.
+cfg$taxon_values <- vapply(trimws(cfg$taxon_values), function(v) {
+  if (!nzchar(v)) return(v)
+  paste0(toupper(substr(v, 1, 1)), tolower(substring(v, 2)))
+}, character(1), USE.NAMES = FALSE)
+
 cat("SPARK pipeline iniciado\n")
 cat("Modo:", cfg$taxon_mode, "-> nível:", cfg$analysis_tax_level, "\n")
 cat("Alvo:", paste(cfg$taxon_values, collapse = ", "), "\n")

@@ -72,6 +72,67 @@ quiet_ob <- function(expr) {
   invisible(NULL)
 }
 
+# ── Renderer capability check: ChemmineR/OpenBabel OR Python/RDKit ───────────
+ob_capable <- tryCatch({
+  test_sdf <- quiet_ob(ChemmineR::smiles2sdf("CCO"))
+  !inherits(test_sdf, "try-error") && length(test_sdf) >= 1 && !is.null(test_sdf[[1]])
+}, error = function(e) FALSE)
+if (!isTRUE(ob_capable)) ob_capable <- FALSE
+
+python_exe       <- cfg$python_exe           %||% ""
+render_py_script <- cfg$render_smiles_script %||% ""
+
+rdkit_capable <- FALSE
+if (!ob_capable &&
+    nzchar(python_exe)       && file.exists(python_exe) &&
+    nzchar(render_py_script) && file.exists(render_py_script)) {
+  tmp_sm  <- tempfile(fileext = ".txt")
+  tmp_png <- tempfile(fileext = ".png")
+  writeLines("CCO", tmp_sm)
+  rc <- suppressWarnings(
+    system2(python_exe,
+            args   = c(shQuote(render_py_script), shQuote(tmp_sm), shQuote(tmp_png)),
+            stdout = FALSE, stderr = FALSE)
+  )
+  rdkit_capable <- isTRUE(rc == 0) &&
+    file.exists(tmp_png) && is.finite(file.info(tmp_png)$size) &&
+    file.info(tmp_png)$size > 0
+  unlink(c(tmp_sm, tmp_png), force = TRUE)
+}
+
+if (!ob_capable && !rdkit_capable) {
+  cat(
+    "[Part II] AVISO: nenhum renderizador de estruturas disponivel.\n",
+    "  OpenBabel nao encontrado e Python/RDKit indisponivel.\n",
+    "  Feche e reabra o launcher para reinstalar as dependencias Python.\n",
+    "  Part II sera pulada.\n",
+    sep = ""
+  )
+  stop("Part II abortada: renderizacao SMILES indisponivel.")
+}
+
+if (ob_capable) {
+  if (verbose_local) cat("Renderizador: ChemmineR/OpenBabel.\n")
+} else {
+  cat("[Part II] Usando Python/RDKit para renderizar estruturas.\n")
+}
+
+render_to_png_py <- function(sm, out_png,
+                              img_w = img_width_px,
+                              img_h = img_height_px) {
+  sm_tmp <- tempfile(fileext = ".txt")
+  writeLines(sm, sm_tmp)
+  on.exit(unlink(sm_tmp, force = TRUE), add = TRUE)
+  rc <- suppressWarnings(
+    system2(python_exe,
+            args   = c(shQuote(render_py_script), shQuote(sm_tmp), shQuote(out_png),
+                       as.character(img_w), as.character(img_h)),
+            stdout = FALSE, stderr = FALSE)
+  )
+  isTRUE(rc == 0) && file.exists(out_png) &&
+    is.finite(file.info(out_png)$size) && file.info(out_png)$size > 0
+}
+
 # Try raw SMILES first; if that fails and fallback is on, strip stereo markers (@)
 safe_sdf_from_smiles <- function(sm) {
   if (is.null(sm) || !nzchar(sm)) return(NULL)
@@ -143,19 +204,27 @@ draw_cell <- function(sm, iupac, ik, formula, mw,
   }
 
   if (is.null(img)) {
-    sdf <- safe_sdf_from_smiles(sm)
-    if (!is.null(sdf)) {
+    if (!ob_capable && rdkit_capable) {
       tf <- tempfile(fileext = ".png")
-      ragg::agg_png(
-        tf, width  = img_w, height = img_h,
-        units  = "px", res    = img_res, background = "white"
-      )
-      par(mar = c(1,1,1,1))
-      plot.new()
-      try(quiet_ob(ChemmineR::plotStruc(sdf)), silent = TRUE)
-      dev.off()
-      img <- tryCatch(png::readPNG(tf), error = function(e) NULL)
+      if (render_to_png_py(sm, tf, img_w, img_h)) {
+        img <- tryCatch(png::readPNG(tf), error = function(e) NULL)
+      }
       unlink(tf, force = TRUE)
+    } else {
+      sdf <- safe_sdf_from_smiles(sm)
+      if (!is.null(sdf)) {
+        tf <- tempfile(fileext = ".png")
+        ragg::agg_png(
+          tf, width  = img_w, height = img_h,
+          units  = "px", res    = img_res, background = "white"
+        )
+        par(mar = c(1,1,1,1))
+        plot.new()
+        try(quiet_ob(ChemmineR::plotStruc(sdf)), silent = TRUE)
+        dev.off()
+        img <- tryCatch(png::readPNG(tf), error = function(e) NULL)
+        unlink(tf, force = TRUE)
+      }
     }
   }
 
@@ -246,6 +315,16 @@ if (isTRUE(gen_pngs)) {
 
     if (file.exists(fn) && is.finite(file.info(fn)$size) && file.info(fn)$size > 0) {
       ok <- ok + 1L
+      next
+    }
+
+    if (!ob_capable && rdkit_capable) {
+      if (render_to_png_py(sm, fn)) {
+        ok <- ok + 1L
+      } else {
+        fail <- fail + 1L
+        render_fail[[length(render_fail) + 1]] <- ik
+      }
       next
     }
 

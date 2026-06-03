@@ -48,7 +48,7 @@ if not exist "%VENV_PY%" (
     echo  OK - .venv already exists
 )
 
-REM -- 3. Install Python dependencies
+REM -- 3. Install Python dependencies (includes rdkit for structure rendering)
 echo.
 echo [3/6] Installing Python dependencies...
 "%VENV_PY%" -m pip install --quiet --upgrade pip >nul 2>&1
@@ -60,6 +60,20 @@ if errorlevel 1 (
     exit /b 1
 )
 echo  OK - Python packages ready
+echo.
+echo  Checking structure renderer (RDKit)...
+"%VENV_PY%" -c "from rdkit import Chem" >nul 2>&1
+if errorlevel 1 (
+    echo  RDKit not found - installing ^(optional, for Part II structure rendering^)...
+    "%VENV_PY%" -m pip install --quiet rdkit >nul 2>&1
+    if errorlevel 1 (
+        echo  WARNING: RDKit installation failed. Part II structure rendering will be skipped.
+    ) else (
+        echo  OK - RDKit installed successfully
+    )
+) else (
+    echo  OK - RDKit already installed
+)
 
 REM -- 4. Check R
 echo.

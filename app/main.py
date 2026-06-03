@@ -6,7 +6,9 @@ Runs R modules (Part I-IV) with a visual configuration panel.
 import glob as _glob
 import io
 import json
+import re
 import shutil
+import sys
 import zipfile
 import socket
 import subprocess
@@ -24,6 +26,7 @@ R_DIR = PROJECT_DIR / "R"
 DBS_DIR = PROJECT_DIR / "DBs"
 RESULTS_DIR = PROJECT_DIR / "results"
 CONFIG_FILE = APP_DIR / "pipeline_config.json"
+RENDER_SMILES_SCRIPT = APP_DIR / "render_smiles.py"
 
 MAIN_PIPELINE = R_DIR / "Main_Pipeline_new_v2.R"
 WFO_TSV = DBS_DIR / "classification.tsv"
@@ -344,6 +347,8 @@ with tab_run:
             "db_name":                          "lotus",
             "coll_name":                        "lotusUniqueNaturalProduct",
             "r_scripts_dir":                    str(R_DIR),
+            "python_exe":                       sys.executable,
+            "render_smiles_script":             str(RENDER_SMILES_SCRIPT),
         }
 
         CONFIG_FILE.write_text(json.dumps(
@@ -441,6 +446,42 @@ with tab_setup:
                 st.success("✅ All packages are installed!")
     else:
         st.info("Set the R path in the sidebar to check packages.")
+
+    st.divider()
+
+    # ── Structure Rendering ─────────────────────────────────────────────────────
+    st.subheader("🔬 Structure Rendering (Part II)")
+
+    def check_rdkit() -> bool:
+        try:
+            from rdkit import Chem
+            from rdkit.Chem import Draw
+            mol = Chem.MolFromSmiles("CCO")
+            return mol is not None
+        except Exception:
+            return False
+
+    def check_openbabel() -> bool:
+        return shutil.which("obabel") is not None or shutil.which("babel") is not None
+
+    rdkit_ok = check_rdkit()
+    obabel_ok = check_openbabel()
+
+    col_rdk, col_ob = st.columns(2)
+    with col_rdk:
+        if rdkit_ok:
+            st.success("✅ RDKit installed (primary renderer)")
+        else:
+            st.error("❌ RDKit not found")
+            st.caption("Reopen the launcher — it installs RDKit automatically via pip.")
+    with col_ob:
+        if obabel_ok:
+            st.success("✅ OpenBabel found (alternative renderer)")
+        else:
+            st.info("ℹ️ OpenBabel not installed (optional — RDKit is used instead)")
+
+    if not rdkit_ok and not obabel_ok:
+        st.warning("⚠️ No structure renderer available — Part II will be skipped. Close and reopen the launcher.")
 
     st.divider()
 
@@ -1110,29 +1151,176 @@ with tab_preview:
 
                 st.divider()
 
-            # ── Image Gallery ─────────────────────────────────────────────────
-            images = sorted(sel_prev.rglob("*.png")) + sorted(sel_prev.rglob("*.jpg"))
-            images = [i for i in images if i.stat().st_size > 2048][:80]
+            # ── Structure Gallery (renders from SMILES via RDKit) ──────────────
+            _sg_df = uni_df if uni_df is not None else None
+            _sg_smiles_col = None
+            if _sg_df is not None:
+                for _c in ("smiles", "smiles2d", "sugar_free_smiles", "canonical_smiles"):
+                    if _c in _sg_df.columns:
+                        _sg_smiles_col = _c
+                        break
 
-            if images:
-                st.subheader(f"🖼️ Structure Gallery ({len(images)})")
+            if _sg_df is not None and _sg_smiles_col is not None:
+                st.subheader("🔬 Structure Gallery")
 
-                subfolders = sorted({i.parent.name for i in images})
-                if len(subfolders) > 1:
-                    folder_filter = st.selectbox(
-                        "Filter by folder", ["All"] + subfolders, key="img_filter"
+                @st.cache_resource(show_spinner=False)
+                def _load_rdkit():
+                    try:
+                        from rdkit import Chem
+                        from rdkit.Chem import Draw
+                        return Chem, Draw
+                    except ImportError:
+                        pass
+                    subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "rdkit"],
+                        capture_output=True, check=False,
                     )
-                    if folder_filter != "All":
-                        images = [i for i in images if i.parent.name == folder_filter]
+                    try:
+                        from rdkit import Chem
+                        from rdkit.Chem import Draw
+                        return Chem, Draw
+                    except ImportError:
+                        return None, None
 
-                cols_per_row = st.select_slider(
-                    "Columns", options=[2, 3, 4, 5], value=4, key="img_cols"
-                )
-                rows = [images[i:i+cols_per_row] for i in range(0, len(images), cols_per_row)]
-                for row in rows:
-                    img_cols = st.columns(cols_per_row)
-                    for col, img_path in zip(img_cols, row):
-                        col.image(str(img_path), caption=img_path.stem, use_container_width=True)
+                with st.spinner("Loading structure renderer..."):
+                    _Chem, _Draw = _load_rdkit()
+
+                if _Chem is None:
+                    st.error(
+                        "RDKit could not be installed automatically. "
+                        "Close the launcher, open a terminal and run: "
+                        "`.venv\\Scripts\\pip install rdkit`, then reopen."
+                    )
+                else:
+                    _sg_name_col = next(
+                        (c for c in _sg_df.columns
+                         if c.lower() in ("iupac_name", "traditional_name", "compound_name")), None
+                    )
+                    _sg_form_col = next(
+                        (c for c in _sg_df.columns if "molecular_formula" in c.lower()), None
+                    )
+                    _sg_mw_col = next(
+                        (c for c in _sg_df.columns
+                         if c.lower() in ("molecular_weight", "mw")), None
+                    )
+                    _sg_ik_col = next(
+                        (c for c in _sg_df.columns
+                         if c.lower() in ("inchikey", "inchi_key")), None
+                    )
+
+                    _structs = (
+                        _sg_df[
+                            _sg_df[_sg_smiles_col].notna()
+                            & (_sg_df[_sg_smiles_col].str.strip().str.len() > 0)
+                        ]
+                        .drop_duplicates(subset=[_sg_ik_col] if _sg_ik_col else None)
+                        .reset_index(drop=True)
+                    )
+
+                    _ctrl_l, _ctrl_r = st.columns([3, 1])
+                    with _ctrl_l:
+                        _sg_cols = st.select_slider(
+                            "Columns", options=[2, 3, 4, 5, 6], value=4, key="sg_cols"
+                        )
+                    with _ctrl_r:
+                        _SG_PAGE = 24
+                        _sg_npages = max(1, (len(_structs) + _SG_PAGE - 1) // _SG_PAGE)
+                        _sg_page = st.number_input(
+                            f"Page (/{_sg_npages})", 1, _sg_npages, 1, key="sg_page"
+                        )
+
+                    _sg_start = (_sg_page - 1) * _SG_PAGE
+                    _sg_slice = _structs.iloc[_sg_start: _sg_start + _SG_PAGE]
+                    st.caption(
+                        f"{len(_structs):,} unique structures  —  "
+                        f"showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
+                    )
+
+                    for _ri in range(0, len(_sg_slice), _sg_cols):
+                        _row_slice = _sg_slice.iloc[_ri: _ri + _sg_cols]
+                        _icols = st.columns(_sg_cols)
+                        for _ic, (_, _row) in zip(_icols, _row_slice.iterrows()):
+                            _sm = str(_row[_sg_smiles_col]).strip()
+                            _mol = _Chem.MolFromSmiles(_sm)
+                            if _mol is None:
+                                _mol = _Chem.MolFromSmiles(re.sub(r'[@/\\]', '', _sm))
+                            if _mol is not None:
+                                _pil = _Draw.MolToImage(_mol, size=(300, 300))
+                                _cap = []
+                                if _sg_name_col and pd.notna(_row.get(_sg_name_col, pd.NA)):
+                                    _n = str(_row[_sg_name_col]).strip()
+                                    if _n and _n.lower() != "nan":
+                                        _cap.append(_n[:55] + ("…" if len(_n) > 55 else ""))
+                                if _sg_form_col and pd.notna(_row.get(_sg_form_col, pd.NA)):
+                                    _cap.append(str(_row[_sg_form_col]))
+                                if _sg_mw_col:
+                                    try:
+                                        _cap.append(f"MW {float(_row[_sg_mw_col]):.1f}")
+                                    except (ValueError, TypeError):
+                                        pass
+                                _ic.image(_pil, caption=" · ".join(_cap) if _cap else _sm[:40],
+                                          use_container_width=True)
+                            else:
+                                _ic.markdown(
+                                    f"<div style='text-align:center;color:#888;font-size:0.75em'>"
+                                    f"Invalid SMILES</div>",
+                                    unsafe_allow_html=True,
+                                )
+
+                    # ── Export all structure images to results folder ──────────
+                    _png_dir = sel_prev / "png"
+                    _n_cached = len(list(_png_dir.glob("STRUCT_*.png"))) if _png_dir.exists() else 0
+
+                    _exp_col, _status_col = st.columns([2, 3])
+                    with _exp_col:
+                        _do_export = st.button(
+                            "💾 Export all structure images",
+                            key="sg_export",
+                            use_container_width=True,
+                            help=(
+                                "Saves all unique structures as optimized PNG files to the "
+                                "png/ subfolder of this result. They will be included in the ZIP download."
+                            ),
+                        )
+                    with _status_col:
+                        if _n_cached > 0:
+                            st.success(f"✅ {_n_cached} images already in png/ — re-export to refresh")
+                        else:
+                            st.info(f"ℹ️ {len(_structs):,} structures ready to export")
+
+                    if _do_export:
+                        _png_dir.mkdir(parents=True, exist_ok=True)
+                        _prog = st.progress(0, text="Exporting…")
+                        _ok_exp = 0
+                        _fail_exp = 0
+                        _total_exp = len(_structs)
+                        for _ei, (_, _erow) in enumerate(_structs.iterrows()):
+                            _esm = str(_erow[_sg_smiles_col]).strip()
+                            _eik = (
+                                re.sub(r"[^A-Za-z0-9._-]+", "_", str(_erow[_sg_ik_col]).strip())
+                                if _sg_ik_col and pd.notna(_erow.get(_sg_ik_col))
+                                else f"struct_{_ei:05d}"
+                            )
+                            _efn = _png_dir / f"STRUCT_{_eik}.png"
+                            if _efn.exists() and _efn.stat().st_size > 0:
+                                _ok_exp += 1
+                            else:
+                                _emol = _Chem.MolFromSmiles(_esm)
+                                if _emol is None:
+                                    _emol = _Chem.MolFromSmiles(re.sub(r'[@/\\]', '', _esm))
+                                if _emol is not None:
+                                    _epil = _Draw.MolToImage(_emol, size=(300, 300))
+                                    _epil.save(str(_efn), format="PNG", optimize=True)
+                                    _ok_exp += 1
+                                else:
+                                    _fail_exp += 1
+                            _prog.progress((_ei + 1) / _total_exp,
+                                           text=f"Exporting {_ei + 1}/{_total_exp}…")
+                        _prog.empty()
+                        _msg = f"✅ {_ok_exp} images saved to `{_png_dir.relative_to(PROJECT_DIR).as_posix()}`"
+                        if _fail_exp:
+                            _msg += f"  ({_fail_exp} invalid SMILES skipped)"
+                        st.success(_msg)
 
                 st.divider()
 
@@ -1189,16 +1377,23 @@ with tab_results:
                 st.info("Empty folder.")
             else:
                 total_mb = sum(f.stat().st_size for f in files) / 1e6
-                st.write(f"**{len(files)} file(s) — {total_mb:.1f} MB total**")
+                st.write(f"**{len(files)} file(s) listed — {total_mb:.1f} MB**")
 
-                # Build zip in memory and offer single download
+                # Count all files (including png/ subfolders not shown in the list above)
+                all_files = [f for f in sel_path.rglob("*") if f.is_file()]
+                all_mb = sum(f.stat().st_size for f in all_files) / 1e6
+                n_imgs = sum(1 for f in all_files if f.suffix.lower() == ".png")
+                if n_imgs:
+                    st.caption(f"📁 Total: {len(all_files)} files ({all_mb:.1f} MB) — includes {n_imgs} PNG structure images")
+
+                # Build zip in memory with ALL files (including png/ subfolder)
                 buf = io.BytesIO()
                 with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for fpath in files:
+                    for fpath in all_files:
                         zf.write(fpath, fpath.relative_to(sel_path))
                 buf.seek(0)
                 st.download_button(
-                    label=f"⬇️ Download entire folder as ZIP  ({total_mb:.1f} MB)",
+                    label=f"⬇️ Download entire folder as ZIP  ({all_mb:.1f} MB — {len(all_files)} files)",
                     data=buf,
                     file_name=f"{sel_path.name}.zip",
                     mime="application/zip",
