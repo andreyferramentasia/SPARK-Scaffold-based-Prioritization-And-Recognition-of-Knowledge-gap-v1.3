@@ -1838,7 +1838,7 @@ if (isTRUE(DO_PCA_PROPS)) {
   }
   lin_enriched[[axis_col]] <- clean_pca_class(lin_enriched[[axis_col]])
   
-  MIN_N_COMPOUNDS <- as.integer(cfg$pca_classes_min_compounds_per_taxon %||% 30L)
+  MIN_N_COMPOUNDS <- as.integer(cfg$pca_classes_min_compounds_per_taxon %||% cfg$analysis_min_compounds_per_taxon %||% 30L)
   TOP_LOADINGS    <- as.integer(cfg$pca_classes_top_loadings %||% 12L)
   POINT_ALPHA     <- 0.8
   POINT_SIZE      <- 2.5 
@@ -1870,8 +1870,8 @@ if (isTRUE(DO_PCA_PROPS)) {
       tidyr::pivot_wider(names_from = !!rlang::sym(axis_col), values_from = n, values_fill = 0)
     
     X <- as.data.frame(tbl); rownames(X) <- X$taxon; X$taxon <- NULL
-    X_prop <- sweep(X, 1, pmax(1, rowSums(X)), "/")
-    keep_cols <- vapply(X_prop, function(v) sd(v, na.rm=TRUE) > 0, logical(1))
+    X_prop <- as.data.frame(sweep(X, 1, pmax(1, rowSums(X)), "/"))
+    keep_cols <- apply(X_prop, 2, function(v) { s <- sd(v, na.rm=TRUE); !is.na(s) && s > 0 })
     X_prop <- X_prop[, keep_cols, drop=FALSE]
     
     if (ncol(X_prop) >= 2) {
