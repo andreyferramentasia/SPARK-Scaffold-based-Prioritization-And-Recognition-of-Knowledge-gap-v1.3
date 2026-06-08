@@ -1217,24 +1217,51 @@ with tab_preview:
                         .reset_index(drop=True)
                     )
 
-                    _ctrl_l, _ctrl_r = st.columns([3, 1])
-                    with _ctrl_l:
+                    _tb_search, _tb_slider, _tb_page = st.columns([5, 2, 1])
+                    with _tb_search:
+                        _sg_search = st.text_input(
+                            "🔍",
+                            placeholder="Search by name, formula, SMILES or InChIKey…",
+                            key="sg_search",
+                            label_visibility="collapsed",
+                        )
+                    with _tb_slider:
                         _sg_cols = st.select_slider(
                             "Columns", options=[2, 3, 4, 5, 6], value=4, key="sg_cols"
                         )
-                    with _ctrl_r:
-                        _SG_PAGE = 24
-                        _sg_npages = max(1, (len(_structs) + _SG_PAGE - 1) // _SG_PAGE)
+
+                    if _sg_search.strip():
+                        _q = _sg_search.strip().lower()
+                        _search_cols = [
+                            c for c in [_sg_name_col, _sg_form_col, _sg_ik_col, _sg_smiles_col]
+                            if c and c in _structs.columns
+                        ]
+                        _mask = pd.Series(False, index=_structs.index)
+                        for _sc in _search_cols:
+                            _mask |= _structs[_sc].astype(str).str.lower().str.contains(
+                                _q, regex=False, na=False
+                            )
+                        _structs = _structs[_mask].reset_index(drop=True)
+
+                    _SG_PAGE = 24
+                    _sg_npages = max(1, (len(_structs) + _SG_PAGE - 1) // _SG_PAGE)
+                    with _tb_page:
                         _sg_page = st.number_input(
                             f"Page (/{_sg_npages})", 1, _sg_npages, 1, key="sg_page"
                         )
 
                     _sg_start = (_sg_page - 1) * _SG_PAGE
                     _sg_slice = _structs.iloc[_sg_start: _sg_start + _SG_PAGE]
-                    st.caption(
-                        f"{len(_structs):,} unique structures  —  "
-                        f"showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
+                    _count_label = (
+                        f"**{len(_structs):,}** match{'es' if len(_structs) != 1 else ''}"
+                        f" — showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
+                        if _sg_search.strip()
+                        else f"**{len(_structs):,}** unique structures"
+                        f" — showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
                     )
+                    st.caption(_count_label)
+                    if _sg_search.strip() and len(_structs) == 0:
+                        st.info("No structures matched your search.", icon="🔍")
 
                     for _ri in range(0, len(_sg_slice), _sg_cols):
                         _row_slice = _sg_slice.iloc[_ri: _ri + _sg_cols]
