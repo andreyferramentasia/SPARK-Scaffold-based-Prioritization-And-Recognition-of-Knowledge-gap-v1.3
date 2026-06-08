@@ -687,11 +687,13 @@ with tab_preview:
                 nc_col       = next((c for c in main_df.columns if c.lower() == "number_of_carbons"), None)
 
                 st.subheader("📈 Chemical Analysis")
-                ctab1, ctab2, ctab3, ctab4 = st.tabs([
+                ctab1, ctab2, ctab3, ctab4, ctab5, ctab6 = st.tabs([
                     "🌿 Chemical Classes",
                     "⚗️ Chemical Space",
                     "🔬 Scaffolds & Structure",
                     "🏆 Priority Results",
+                    "🖼️ Structure Gallery",
+                    "📋 Data Tables",
                 ])
 
                 # ── Tab 1: Chemical class distribution ────────────────────────
@@ -1149,234 +1151,228 @@ with tab_preview:
                                 )
                                 st.dataframe(top20_df, use_container_width=True, height=320)
 
-                st.divider()
+                # ── Tab 5: Structure Gallery ──────────────────────────────────
+                with ctab5:
+                    _sg_df = uni_df
+                    _sg_smiles_col = None
+                    if _sg_df is not None:
+                        for _c in ("smiles", "smiles2d", "sugar_free_smiles", "canonical_smiles"):
+                            if _c in _sg_df.columns:
+                                _sg_smiles_col = _c
+                                break
 
-            # ── Structure Gallery (renders from SMILES via RDKit) ──────────────
-            _sg_df = uni_df if uni_df is not None else None
-            _sg_smiles_col = None
-            if _sg_df is not None:
-                for _c in ("smiles", "smiles2d", "sugar_free_smiles", "canonical_smiles"):
-                    if _c in _sg_df.columns:
-                        _sg_smiles_col = _c
-                        break
-
-            if _sg_df is not None and _sg_smiles_col is not None:
-                st.subheader("🔬 Structure Gallery")
-
-                @st.cache_resource(show_spinner=False)
-                def _load_rdkit():
-                    try:
-                        from rdkit import Chem
-                        from rdkit.Chem import Draw
-                        return Chem, Draw
-                    except ImportError:
-                        pass
-                    subprocess.run(
-                        [sys.executable, "-m", "pip", "install", "rdkit"],
-                        capture_output=True, check=False,
-                    )
-                    try:
-                        from rdkit import Chem
-                        from rdkit.Chem import Draw
-                        return Chem, Draw
-                    except ImportError:
-                        return None, None
-
-                with st.spinner("Loading structure renderer..."):
-                    _Chem, _Draw = _load_rdkit()
-
-                if _Chem is None:
-                    st.error(
-                        "RDKit could not be installed automatically. "
-                        "Close the launcher, open a terminal and run: "
-                        "`.venv\\Scripts\\pip install rdkit`, then reopen."
-                    )
-                else:
-                    _sg_name_col = next(
-                        (c for c in _sg_df.columns
-                         if c.lower() in ("iupac_name", "traditional_name", "compound_name")), None
-                    )
-                    _sg_form_col = next(
-                        (c for c in _sg_df.columns if "molecular_formula" in c.lower()), None
-                    )
-                    _sg_mw_col = next(
-                        (c for c in _sg_df.columns
-                         if c.lower() in ("molecular_weight", "mw")), None
-                    )
-                    _sg_ik_col = next(
-                        (c for c in _sg_df.columns
-                         if c.lower() in ("inchikey", "inchi_key")), None
-                    )
-
-                    _structs = (
-                        _sg_df[
-                            _sg_df[_sg_smiles_col].notna()
-                            & (_sg_df[_sg_smiles_col].str.strip().str.len() > 0)
-                        ]
-                        .drop_duplicates(subset=[_sg_ik_col] if _sg_ik_col else None)
-                        .reset_index(drop=True)
-                    )
-
-                    _tb_search, _tb_slider, _tb_page = st.columns([5, 2, 1])
-                    with _tb_search:
-                        _sg_search = st.text_input(
-                            "🔍",
-                            placeholder="Search by name, formula, SMILES or InChIKey…",
-                            key="sg_search",
-                            label_visibility="collapsed",
-                        )
-                    with _tb_slider:
-                        _sg_cols = st.select_slider(
-                            "Columns", options=[2, 3, 4, 5, 6], value=4, key="sg_cols"
-                        )
-
-                    if _sg_search.strip():
-                        _q = _sg_search.strip().lower()
-                        _search_cols = [
-                            c for c in [_sg_name_col, _sg_form_col, _sg_ik_col, _sg_smiles_col]
-                            if c and c in _structs.columns
-                        ]
-                        _mask = pd.Series(False, index=_structs.index)
-                        for _sc in _search_cols:
-                            _mask |= _structs[_sc].astype(str).str.lower().str.contains(
-                                _q, regex=False, na=False
+                    if _sg_df is None or _sg_smiles_col is None:
+                        st.info("No SMILES data found in this run. Run Part I to generate structure data.")
+                    else:
+                        @st.cache_resource(show_spinner=False)
+                        def _load_rdkit():
+                            try:
+                                from rdkit import Chem
+                                from rdkit.Chem import Draw
+                                return Chem, Draw
+                            except ImportError:
+                                pass
+                            subprocess.run(
+                                [sys.executable, "-m", "pip", "install", "rdkit"],
+                                capture_output=True, check=False,
                             )
-                        _structs = _structs[_mask].reset_index(drop=True)
+                            try:
+                                from rdkit import Chem
+                                from rdkit.Chem import Draw
+                                return Chem, Draw
+                            except ImportError:
+                                return None, None
 
-                    _SG_PAGE = 24
-                    _sg_npages = max(1, (len(_structs) + _SG_PAGE - 1) // _SG_PAGE)
-                    with _tb_page:
-                        _sg_page = st.number_input(
-                            f"Page (/{_sg_npages})", 1, _sg_npages, 1, key="sg_page"
-                        )
+                        with st.spinner("Loading structure renderer..."):
+                            _Chem, _Draw = _load_rdkit()
 
-                    _sg_start = (_sg_page - 1) * _SG_PAGE
-                    _sg_slice = _structs.iloc[_sg_start: _sg_start + _SG_PAGE]
-                    _count_label = (
-                        f"**{len(_structs):,}** match{'es' if len(_structs) != 1 else ''}"
-                        f" — showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
-                        if _sg_search.strip()
-                        else f"**{len(_structs):,}** unique structures"
-                        f" — showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
-                    )
-                    st.caption(_count_label)
-                    if _sg_search.strip() and len(_structs) == 0:
-                        st.info("No structures matched your search.", icon="🔍")
+                        if _Chem is None:
+                            st.error(
+                                "RDKit could not be installed automatically. "
+                                "Close the launcher, open a terminal and run: "
+                                "`.venv\\Scripts\\pip install rdkit`, then reopen."
+                            )
+                        else:
+                            _sg_name_col = next(
+                                (c for c in _sg_df.columns
+                                 if c.lower() in ("iupac_name", "traditional_name", "compound_name")), None
+                            )
+                            _sg_form_col = next(
+                                (c for c in _sg_df.columns if "molecular_formula" in c.lower()), None
+                            )
+                            _sg_mw_col = next(
+                                (c for c in _sg_df.columns
+                                 if c.lower() in ("molecular_weight", "mw")), None
+                            )
+                            _sg_ik_col = next(
+                                (c for c in _sg_df.columns
+                                 if c.lower() in ("inchikey", "inchi_key")), None
+                            )
 
-                    for _ri in range(0, len(_sg_slice), _sg_cols):
-                        _row_slice = _sg_slice.iloc[_ri: _ri + _sg_cols]
-                        _icols = st.columns(_sg_cols)
-                        for _ic, (_, _row) in zip(_icols, _row_slice.iterrows()):
-                            _sm = str(_row[_sg_smiles_col]).strip()
-                            _mol = _Chem.MolFromSmiles(_sm)
-                            if _mol is None:
-                                _mol = _Chem.MolFromSmiles(re.sub(r'[@/\\]', '', _sm))
-                            if _mol is not None:
-                                _pil = _Draw.MolToImage(_mol, size=(300, 300))
-                                _cap = []
-                                if _sg_name_col and pd.notna(_row.get(_sg_name_col, pd.NA)):
-                                    _n = str(_row[_sg_name_col]).strip()
-                                    if _n and _n.lower() != "nan":
-                                        _cap.append(_n[:55] + ("…" if len(_n) > 55 else ""))
-                                if _sg_form_col and pd.notna(_row.get(_sg_form_col, pd.NA)):
-                                    _cap.append(str(_row[_sg_form_col]))
-                                if _sg_mw_col:
-                                    try:
-                                        _cap.append(f"MW {float(_row[_sg_mw_col]):.1f}")
-                                    except (ValueError, TypeError):
-                                        pass
-                                _ic.image(_pil, caption=" · ".join(_cap) if _cap else _sm[:40],
-                                          use_container_width=True)
-                            else:
-                                _ic.markdown(
-                                    f"<div style='text-align:center;color:#888;font-size:0.75em'>"
-                                    f"Invalid SMILES</div>",
-                                    unsafe_allow_html=True,
+                            _structs = (
+                                _sg_df[
+                                    _sg_df[_sg_smiles_col].notna()
+                                    & (_sg_df[_sg_smiles_col].str.strip().str.len() > 0)
+                                ]
+                                .drop_duplicates(subset=[_sg_ik_col] if _sg_ik_col else None)
+                                .reset_index(drop=True)
+                            )
+
+                            # ── Toolbar: [ Search ] [ Cols ] [ Page ] [ Export ] ─
+                            _png_dir = sel_prev / "png"
+                            _n_cached = len(list(_png_dir.glob("STRUCT_*.png"))) if _png_dir.exists() else 0
+
+                            _c_search, _c_cols, _c_page, _c_export = st.columns([5, 2, 1, 2])
+                            with _c_search:
+                                _sg_search = st.text_input(
+                                    "🔍",
+                                    placeholder="Search by name, formula, SMILES or InChIKey…",
+                                    key="sg_search",
+                                    label_visibility="collapsed",
+                                )
+                            with _c_cols:
+                                _sg_cols = st.select_slider(
+                                    "Columns", options=[2, 3, 4, 5, 6], value=4, key="sg_cols"
+                                )
+                            with _c_export:
+                                _do_export = st.button(
+                                    "💾 Export images",
+                                    key="sg_export",
+                                    use_container_width=True,
+                                    help=(
+                                        "Saves all unique structures as optimized PNG files to the "
+                                        "png/ subfolder of this result. They will be included in the ZIP download."
+                                    ),
+                                )
+                                if _n_cached > 0:
+                                    st.caption(f"✅ {_n_cached} cached")
+
+                            # Apply search filter
+                            if _sg_search.strip():
+                                _q = _sg_search.strip().lower()
+                                _search_cols = [
+                                    c for c in [_sg_name_col, _sg_form_col, _sg_ik_col, _sg_smiles_col]
+                                    if c and c in _structs.columns
+                                ]
+                                _mask = pd.Series(False, index=_structs.index)
+                                for _sc in _search_cols:
+                                    _mask |= _structs[_sc].astype(str).str.lower().str.contains(
+                                        _q, regex=False, na=False
+                                    )
+                                _structs = _structs[_mask].reset_index(drop=True)
+
+                            _SG_PAGE = 24
+                            _sg_npages = max(1, (len(_structs) + _SG_PAGE - 1) // _SG_PAGE)
+                            with _c_page:
+                                _sg_page = st.number_input(
+                                    f"Page (/{_sg_npages})", 1, _sg_npages, 1, key="sg_page"
                                 )
 
-                    # ── Export all structure images to results folder ──────────
-                    _png_dir = sel_prev / "png"
-                    _n_cached = len(list(_png_dir.glob("STRUCT_*.png"))) if _png_dir.exists() else 0
-
-                    _exp_col, _status_col = st.columns([2, 3])
-                    with _exp_col:
-                        _do_export = st.button(
-                            "💾 Export all structure images",
-                            key="sg_export",
-                            use_container_width=True,
-                            help=(
-                                "Saves all unique structures as optimized PNG files to the "
-                                "png/ subfolder of this result. They will be included in the ZIP download."
-                            ),
-                        )
-                    with _status_col:
-                        if _n_cached > 0:
-                            st.success(f"✅ {_n_cached} images already in png/ — re-export to refresh")
-                        else:
-                            st.info(f"ℹ️ {len(_structs):,} structures ready to export")
-
-                    if _do_export:
-                        _png_dir.mkdir(parents=True, exist_ok=True)
-                        _prog = st.progress(0, text="Exporting…")
-                        _ok_exp = 0
-                        _fail_exp = 0
-                        _total_exp = len(_structs)
-                        for _ei, (_, _erow) in enumerate(_structs.iterrows()):
-                            _esm = str(_erow[_sg_smiles_col]).strip()
-                            _eik = (
-                                re.sub(r"[^A-Za-z0-9._-]+", "_", str(_erow[_sg_ik_col]).strip())
-                                if _sg_ik_col and pd.notna(_erow.get(_sg_ik_col))
-                                else f"struct_{_ei:05d}"
+                            _sg_start = (_sg_page - 1) * _SG_PAGE
+                            _sg_slice = _structs.iloc[_sg_start: _sg_start + _SG_PAGE]
+                            _count_label = (
+                                f"**{len(_structs):,}** match{'es' if len(_structs) != 1 else ''}"
+                                f" — showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
+                                if _sg_search.strip()
+                                else f"**{len(_structs):,}** unique structures"
+                                f" — showing {_sg_start + 1}–{min(_sg_start + _SG_PAGE, len(_structs))}"
                             )
-                            _efn = _png_dir / f"STRUCT_{_eik}.png"
-                            if _efn.exists() and _efn.stat().st_size > 0:
-                                _ok_exp += 1
+                            st.caption(_count_label)
+                            if _sg_search.strip() and len(_structs) == 0:
+                                st.info("No structures matched your search.", icon="🔍")
+
+                            for _ri in range(0, len(_sg_slice), _sg_cols):
+                                _row_slice = _sg_slice.iloc[_ri: _ri + _sg_cols]
+                                _icols = st.columns(_sg_cols)
+                                for _ic, (_, _row) in zip(_icols, _row_slice.iterrows()):
+                                    _sm = str(_row[_sg_smiles_col]).strip()
+                                    _mol = _Chem.MolFromSmiles(_sm)
+                                    if _mol is None:
+                                        _mol = _Chem.MolFromSmiles(re.sub(r'[@/\\]', '', _sm))
+                                    if _mol is not None:
+                                        _pil = _Draw.MolToImage(_mol, size=(300, 300))
+                                        _cap = []
+                                        if _sg_name_col and pd.notna(_row.get(_sg_name_col, pd.NA)):
+                                            _n = str(_row[_sg_name_col]).strip()
+                                            if _n and _n.lower() != "nan":
+                                                _cap.append(_n[:55] + ("…" if len(_n) > 55 else ""))
+                                        if _sg_form_col and pd.notna(_row.get(_sg_form_col, pd.NA)):
+                                            _cap.append(str(_row[_sg_form_col]))
+                                        if _sg_mw_col:
+                                            try:
+                                                _cap.append(f"MW {float(_row[_sg_mw_col]):.1f}")
+                                            except (ValueError, TypeError):
+                                                pass
+                                        _ic.image(_pil, caption=" · ".join(_cap) if _cap else _sm[:40],
+                                                  use_container_width=True)
+                                    else:
+                                        _ic.markdown(
+                                            f"<div style='text-align:center;color:#888;font-size:0.75em'>"
+                                            f"Invalid SMILES</div>",
+                                            unsafe_allow_html=True,
+                                        )
+
+                            # ── Export progress (runs below grid after button click) ──
+                            if _do_export:
+                                _png_dir.mkdir(parents=True, exist_ok=True)
+                                _prog = st.progress(0, text="Exporting…")
+                                _ok_exp = 0
+                                _fail_exp = 0
+                                _total_exp = len(_structs)
+                                for _ei, (_, _erow) in enumerate(_structs.iterrows()):
+                                    _esm = str(_erow[_sg_smiles_col]).strip()
+                                    _eik = (
+                                        re.sub(r"[^A-Za-z0-9._-]+", "_", str(_erow[_sg_ik_col]).strip())
+                                        if _sg_ik_col and pd.notna(_erow.get(_sg_ik_col))
+                                        else f"struct_{_ei:05d}"
+                                    )
+                                    _efn = _png_dir / f"STRUCT_{_eik}.png"
+                                    if _efn.exists() and _efn.stat().st_size > 0:
+                                        _ok_exp += 1
+                                    else:
+                                        _emol = _Chem.MolFromSmiles(_esm)
+                                        if _emol is None:
+                                            _emol = _Chem.MolFromSmiles(re.sub(r'[@/\\]', '', _esm))
+                                        if _emol is not None:
+                                            _epil = _Draw.MolToImage(_emol, size=(300, 300))
+                                            _epil.save(str(_efn), format="PNG", optimize=True)
+                                            _ok_exp += 1
+                                        else:
+                                            _fail_exp += 1
+                                    _prog.progress((_ei + 1) / _total_exp,
+                                                   text=f"Exporting {_ei + 1}/{_total_exp}…")
+                                _prog.empty()
+                                _msg = f"✅ {_ok_exp} images saved to `{_png_dir.relative_to(PROJECT_DIR).as_posix()}`"
+                                if _fail_exp:
+                                    _msg += f"  ({_fail_exp} invalid SMILES skipped)"
+                                st.success(_msg)
+
+                # ── Tab 6: Data Tables ────────────────────────────────────────
+                with ctab6:
+                    data_files = (
+                        sorted(sel_prev.rglob("*.parquet"))
+                        + sorted(sel_prev.rglob("*.xlsx"))
+                        + sorted(sel_prev.rglob("*.csv"))
+                    )
+                    data_files = [f for f in data_files if f.stat().st_size > 1024][:12]
+
+                    if data_files:
+                        st.caption(f"{len(data_files)} file(s) available")
+                        chosen = st.selectbox(
+                            "Select table",
+                            options=data_files,
+                            format_func=lambda f: f.relative_to(sel_prev).as_posix(),
+                            key="preview_table",
+                        )
+                        if chosen:
+                            df_t = _load_df(Path(chosen), nrows=500)
+                            if df_t is not None:
+                                st.caption(f"{len(df_t)} rows × {len(df_t.columns)} columns")
+                                st.dataframe(df_t, use_container_width=True, height=380)
                             else:
-                                _emol = _Chem.MolFromSmiles(_esm)
-                                if _emol is None:
-                                    _emol = _Chem.MolFromSmiles(re.sub(r'[@/\\]', '', _esm))
-                                if _emol is not None:
-                                    _epil = _Draw.MolToImage(_emol, size=(300, 300))
-                                    _epil.save(str(_efn), format="PNG", optimize=True)
-                                    _ok_exp += 1
-                                else:
-                                    _fail_exp += 1
-                            _prog.progress((_ei + 1) / _total_exp,
-                                           text=f"Exporting {_ei + 1}/{_total_exp}…")
-                        _prog.empty()
-                        _msg = f"✅ {_ok_exp} images saved to `{_png_dir.relative_to(PROJECT_DIR).as_posix()}`"
-                        if _fail_exp:
-                            _msg += f"  ({_fail_exp} invalid SMILES skipped)"
-                        st.success(_msg)
-
-                st.divider()
-
-            # ── Data Tables ───────────────────────────────────────────────────
-            data_files = (
-                sorted(sel_prev.rglob("*.parquet"))
-                + sorted(sel_prev.rglob("*.xlsx"))
-                + sorted(sel_prev.rglob("*.csv"))
-            )
-            data_files = [f for f in data_files if f.stat().st_size > 1024][:12]
-
-            if data_files:
-                st.subheader(f"📋 Data Tables ({len(data_files)})")
-                chosen = st.selectbox(
-                    "Select table",
-                    options=data_files,
-                    format_func=lambda f: f.relative_to(sel_prev).as_posix(),
-                    key="preview_table",
-                )
-                if chosen:
-                    df_t = _load_df(Path(chosen), nrows=500)
-                    if df_t is not None:
-                        st.caption(f"{len(df_t)} rows × {len(df_t.columns)} columns")
-                        st.dataframe(df_t, use_container_width=True, height=380)
+                                st.error("Could not read this file.")
                     else:
-                        st.error("Could not read this file.")
-
-            if main_df is None and not images and not data_files:
-                st.info("No output files found in this run folder.")
+                        st.info("No data files found in this run folder.")
 
 # ── TAB: RESULTS ──────────────────────────────────────────────────────────────
 with tab_results:
