@@ -657,8 +657,10 @@ make_class_taxon_heatmap <- function(
   mat_plot <- if (isTRUE(log_transform)) log1p(mat) else mat
   
   # ---- 4) Paleta de cores (30 tons, sequencial) ----
-  brks <- seq(min(mat_plot, na.rm = TRUE),
-              max(mat_plot, na.rm = TRUE), length.out = 30)
+  v_min <- min(mat_plot, na.rm = TRUE)
+  v_max <- max(mat_plot, na.rm = TRUE)
+  if (!is.finite(v_min) || !is.finite(v_max) || v_min == v_max) v_max <- v_min + 1e-6
+  brks <- seq(v_min, v_max, length.out = 30)
   cols <- colorRampPalette(
     c("#FEFFF7","#FFF7BC","#FEE391","#FEC44F",
       "#FE9929","#EC7014","#CC4C02","#993404","#662506")
@@ -856,7 +858,7 @@ if (isTRUE(DO_PHYSCHEM_VIOLIN)) {
     
     # Plot
     p_vio <- ggplot(df_vio_final, aes(x = .data[[tax_col]], y = Val)) +
-      geom_violin(aes(fill = Var), scale = "width", trim = TRUE, alpha = 0.6, size = 0.3) +
+      geom_violin(aes(fill = Var), scale = "width", trim = TRUE, alpha = 0.6, linewidth = 0.3) +
       geom_boxplot(width = 0.15, fill = "white", outlier.shape = NA, alpha = 0.8) +
       stat_summary(fun = mean, geom = "point", size = 0.8, color = "black") +
       facet_wrap(~Var, scales = "free_x", nrow = 1) + 
@@ -958,8 +960,10 @@ if (isTRUE(DO_PHYSCHEM_HEATMAP)) {
         mat_phys[is.na(mat_phys)] <- 0
         
         # ---- Colors ----
-        brks <- seq(min(mat_phys, na.rm = TRUE),
-                    max(mat_phys, na.rm = TRUE), length.out = 30)
+        p_min <- min(mat_phys, na.rm = TRUE)
+        p_max <- max(mat_phys, na.rm = TRUE)
+        if (!is.finite(p_min) || !is.finite(p_max) || p_min == p_max) p_max <- p_min + 1e-6
+        brks <- seq(p_min, p_max, length.out = 30)
         col_fun <- circlize::colorRamp2(
           breaks = brks,
           colors = colorRampPalette(c("#2166AC","white","#B2182B"))(30)

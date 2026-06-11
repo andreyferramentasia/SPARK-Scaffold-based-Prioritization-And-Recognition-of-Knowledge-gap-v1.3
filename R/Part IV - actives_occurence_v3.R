@@ -194,7 +194,14 @@ if (length(activities_list) > 0) {
   cat("Done. Saved:", basename(outfile_sum), "\n")
 } else {
   cat("No valid bioactivities (<10uM) found.\n")
-  bio_evidence_A <- data.frame(inchikey = character(0))
+  bio_evidence_A <- data.frame(
+    inchikey        = character(0),
+    Best_Potency_nM = numeric(0),
+    Best_Target     = character(0),
+    Best_Organism   = character(0),
+    N_Assays        = integer(0),
+    Evidence_Flag_A = character(0)
+  )
 }
 
 rm(list=intersect(ls(), c("res_list","activities_list","raw_activities","chembl_map","batches")))
