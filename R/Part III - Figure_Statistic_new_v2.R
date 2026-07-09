@@ -246,6 +246,13 @@ fam_label_safe <- scope_label
 min_n_taxon <- as.integer(cfg$analysis_min_compounds_per_taxon %||% 10L)
 TOP_N_TAXA  <- as.integer(cfg$analysis_top_taxa %||% 40L)
 
+# Limiar a partir do qual avisamos sobre custo de memória/tempo em blocos
+# O(n^2)/O(n^3) (PCA, PCoA) — o usuário pode ajustar via cfg, mas é alertado
+# se o valor escolhido (ou o nº de táxons elegíveis) for grande.
+# Mantido em sincronia com o aviso equivalente no slider "Max taxa in plots"
+# do Streamlit (app/main.py).
+SAFE_TAXA_WARN <- as.integer(cfg$analysis_top_taxa_warn_threshold %||% 60L)
+
 use_superclass   <- isTRUE(cfg$analysis_heatmap_use_superclass %||%
                              cfg$chem_use_superclass %||% FALSE)
 occ_pct_min      <- as.numeric(cfg$analysis_heatmap_min_occ_pct %||%
@@ -1860,11 +1867,27 @@ if (isTRUE(DO_PCA_PROPS)) {
     ) %>%
     dplyr::filter(!is.na(taxon), nzchar(taxon), !is.na(.data[[axis_col]]), nzchar(.data[[axis_col]]))
   
-  keep_taxa <- lin_use %>%
+  taxa_counts_pca <- lin_use %>%
     dplyr::count(taxon, name="n") %>%
     dplyr::filter(n >= MIN_N_COMPOUNDS) %>%
+    dplyr::arrange(dplyr::desc(n))
+
+  # Aplica o mesmo teto (TOP_N_TAXA) usado no resto do Part III — sem isso,
+  # famílias com muitos gêneros/espécies (ex.: Fabaceae) geram uma matriz
+  # táxon x classe grande demais para prcomp() lidar com conforto.
+  keep_taxa <- taxa_counts_pca %>%
+    dplyr::slice_head(n = TOP_N_TAXA) %>%
     dplyr::pull(taxon)
-  
+
+  if (length(keep_taxa) > SAFE_TAXA_WARN) {
+    warning(sprintf(
+      paste0("PCA: usando %d taxa (cfg$analysis_top_taxa=%d). Valores grandes aumentam ",
+             "tempo/memoria de prcomp() e tornam os rotulos do biplot ilegiveis. ",
+             "Considere reduzir 'analysis_top_taxa' no cfg se nao for intencional."),
+      length(keep_taxa), TOP_N_TAXA
+    ))
+  }
+
   lin_use <- lin_use %>% dplyr::filter(taxon %in% keep_taxa)
   
   if (nrow(lin_use) > 0) {
@@ -2060,7 +2083,25 @@ if (isTRUE(DO_PCOA)) {
         pa_mat <- pa_mat[keep_rows, , drop=FALSE]
         if(nrow(pa_mat) > 0) pa_mat <- pa_mat[, colSums(pa_mat) > 0, drop=FALSE]
       }
-      
+
+      # Mesmo teto de TOP_N_TAXA usado no resto do Part III — sem isso,
+      # familias com muitos taxa (ex.: Fabaceae) geram uma matriz de
+      # distancia/cmdscale (custo O(n^2)/O(n^3)) grande demais.
+      if (nrow(pa_mat) > TOP_N_TAXA) {
+        ord_pcoa <- order(rowSums(pa_mat), decreasing = TRUE)[seq_len(TOP_N_TAXA)]
+        pa_mat   <- pa_mat[ord_pcoa, , drop = FALSE]
+        if (ncol(pa_mat) > 0) pa_mat <- pa_mat[, colSums(pa_mat) > 0, drop = FALSE]
+      }
+
+      if (nrow(pa_mat) > SAFE_TAXA_WARN) {
+        warning(sprintf(
+          paste0("[PCoA] usando %d taxa (cfg$analysis_top_taxa=%d). Valores grandes ",
+                 "aumentam custo de vegdist()/cmdscale() (O(n^2)/O(n^3)) e podem travar ",
+                 "ou consumir muita memoria. Considere reduzir 'analysis_top_taxa' no cfg."),
+          nrow(pa_mat), TOP_N_TAXA
+        ))
+      }
+
       if (nrow(pa_mat) < 3 || ncol(pa_mat) < 2) {
         warning(paste0("[PCoA] Matrix too small (Rows=", nrow(pa_mat), "). Need >= 3 taxa. Reduce 'analysis_min_compounds'."))
       } else {

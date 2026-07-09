@@ -221,6 +221,13 @@ with st.sidebar:
     with st.expander("Advanced Settings"):
         top_taxa = st.slider("Max taxa in plots", 5, 100,
                              40, disabled=st.session_state.running)
+        if top_taxa > 60:
+            st.warning(
+                f"⚠️ {top_taxa} taxa in PCA/PCoA increases runtime and memory "
+                "use noticeably (these steps scale quadratically to cubically "
+                "with taxa count) and can make plot labels unreadable. "
+                "Recommended for large families (e.g. Fabaceae): keep this ≤ 60."
+            )
         min_compounds = st.slider(
             "Min compounds per taxon", 1, 50, 10, disabled=st.session_state.running)
         use_wfo = st.checkbox("WFO normalization", value=True,
